@@ -300,10 +300,23 @@
   });
   // click buys EXACTLY ONE node — only when its rosette chain order is kept
   // (all predecessors bought) and the node is connected by a line to a bought
-  // node; chain starts (no predecessors) are the entry points of their rosette
+  // node; chain starts (no predecessors) are the entry points of their rosette.
+  // Repeated click on a bought node REMOVES it — allowed only when nothing
+  // after it is purchased (no chain successors, and for a root: no bought
+  // nodes in its own wheel).
+  function dependentsBought(id){
+    return D.nodes.some(function(m){ return m.lv > 0 && (m.sq || []).indexOf(id) >= 0; });
+  }
+  function rootBranchBought(rootNode){
+    return D.nodes.some(function(m){ return m.lv > 0 && m.t !== "root" && m.w === rootNode.w; });
+  }
+  function canRemove(n){
+    if (n.t === "root") return !rootBranchBought(n);
+    return !dependentsBought(n.id);
+  }
   function buy(n){
     if (n.t === "hub") return;
-    if (n.lv > 0) return;
+    if (n.lv > 0){ refund(n); return; } // repeated click removes (if nothing after)
     if (n.t === "root"){
       if (!n._ok) return; // another class already chosen
       n.lv = 1; spent += 1;
@@ -318,6 +331,7 @@
   }
   function refund(n){
     if (n.lv <= 0) return;
+    if (!canRemove(n)) return;
     n.lv = 0; spent = Math.max(0, spent - 1);
     if (lastTipNode === n) showTip(n);
     refreshAll();
@@ -353,8 +367,13 @@
       meta = "[" + T.cur + " " + n.lv + "/" + n.m +
              (ATTRS.indexOf(n.pr) >= 0 ? " · +5 к " + (LANG === "ru" ? ARU[n.pr] : n.pr) : "") +
              (n.lv ? "" : " · 1 перк") + "]";
-      if (n.lv && ATTRS.indexOf(n.pr) >= 0)
-        meta += LANG === "ru" ? " · куплено" : " · purchased";
+      if (n.lv){
+        if (ATTRS.indexOf(n.pr) >= 0) meta += " · +5";
+        if (n.t === "root" ? rootBranchBought(n) : dependentsBought(n.id))
+          meta += LANG === "ru" ? " · после куплены узлы — снять нельзя" : " · nodes purchased after — cannot remove";
+        else
+          meta += LANG === "ru" ? " · повторный клик — снять" : " · click again to remove";
+      }
       if (kind) meta += " · " + esc(kind);
       if (!n.lv && !n._ok){
         var pend = (n.sq || []).filter(function(sq){ return !bought(sq); });
