@@ -232,21 +232,16 @@
       if (n._hit) n._hit.style.cursor = "help";
       return;
     }
-    // available = chain order kept (all rosette predecessors bought) AND
-    // (a bought line-neighbor OR the node is a chain start with no predecessors)
-    var sqOk = (n.sq || []).every(function(s){ return bought(s); });
-    var nbBought = (neighbors[n.id] || []).some(bought);
-    var avail = sqOk && (nbBought || (n.sq || []).length === 0);
-    n._ok = avail;
+    // every non-hub node is clickable: the click levels the whole chain to it
     if (n._c){
-      n._c.setAttribute("stroke", n.lv ? "#e2c56c" : (avail ? "#8a8271" : "#3f3a31"));
+      n._c.setAttribute("stroke", n.lv ? "#e2c56c" : "#8a8271");
       n._c.setAttribute("stroke-width", n.lv ? "2" : "1.3");
       n._c.setAttribute("fill", n.lv ? "#3a3123" : "#26231e");
     }
-    if (n._ic) n._ic.setAttribute("opacity", n.lv ? "1" : (avail ? ".92" : ".38"));
-    if (n._dot) n._dot.setAttribute("opacity", n.lv || avail ? "1" : ".4");
+    if (n._ic) n._ic.setAttribute("opacity", n.lv ? "1" : ".92");
+    if (n._dot) n._dot.setAttribute("opacity", "1");
     if (n._b) n._b.setAttribute("stroke-opacity", n.lv ? ".9" : "0");
-    if (n._hit) n._hit.style.cursor = avail ? "pointer" : "not-allowed";
+    if (n._hit) n._hit.style.cursor = "pointer";
   }
   function refreshAll(){
     D.nodes.forEach(refresh);
@@ -298,12 +293,10 @@
     ch.addEventListener("mousemove", moveTip);
     ch.addEventListener("mouseleave", function(){ tip.style.display = "none"; });
   });
-  // click buys EXACTLY ONE node — only when its rosette chain order is kept
-  // (all predecessors bought) and the node is connected by a line to a bought
-  // node; chain starts (no predecessors) are the entry points of their rosette.
-  // Repeated click on a bought node REMOVES it — allowed only when nothing
-  // after it is purchased (no chain successors, and for a root: no bought
-  // nodes in its own wheel).
+  // click = buy the node + everything required along the lines: the whole
+  // rosette chain up to it and the line-path to the nearest bought node;
+  // each real node costs exactly 1 perk, hubs on the way are free connectors —
+  // Вся цепочка качается целиком (как у планировщика undeadlegacytools.com)
   function dependentsBought(id){
     return D.nodes.some(function(m){ return m.lv > 0 && (m.sq || []).indexOf(id) >= 0; });
   }
@@ -313,6 +306,46 @@
   function canRemove(n){
     if (n.t === "root") return !rootBranchBought(n);
     return !dependentsBought(n.id);
+  }
+  function collectRequired(targetId){
+    var R = [targetId], inR = {};
+    inR[targetId] = true;
+    var queue = [targetId];
+    while (queue.length){
+      var id = queue.shift();
+      var m = byId[id];
+      (m.sq || []).forEach(function(sq){
+        if (!inR[sq] && !bought(sq)){ inR[sq] = true; R.push(sq); queue.push(sq); }
+      });
+      if (!(neighbors[id] || []).some(bought)){
+        var path = pathToNearestBought(id);
+        (path || []).forEach(function(pid){
+          if (!inR[pid]){ inR[pid] = true; R.push(pid); queue.push(pid); }
+        });
+      }
+    }
+    return R;
+  }
+  function pathToNearestBought(startId){
+    var prev = {}, seen = {};
+    seen[startId] = true;
+    var q = [startId];
+    while (q.length){
+      var cur = q.shift();
+      if (cur !== startId && bought(cur)){
+        var path = [], c = cur;
+        while (c !== undefined && c !== startId){ path.push(c); c = prev[c]; }
+        return path; // bought node ... up to (excluding) startId
+      }
+      var nb = neighbors[cur] || [];
+      for (var i = 0; i < nb.length; i++){
+        var id = nb[i], m = byId[id];
+        if (!m || seen[id]) continue;
+        if (m.t === "root" && m.lv === 0) continue; // roots are bought directly
+        seen[id] = true; prev[id] = cur; q.push(id);
+      }
+    }
+    return null;
   }
   function buy(n){
     if (n.t === "hub") return;
@@ -324,8 +357,10 @@
       refreshAll();
       return;
     }
-    if (!n._ok) return; // chain order / line connection not met yet
-    n.lv = 1; spent += 1;
+    collectRequired(n.id).forEach(function(id){
+      var m = byId[id];
+      if (m.t !== "hub" && m.lv === 0){ m.lv = 1; spent += 1; }
+    });
     if (lastTipNode === n) showTip(n);
     refreshAll();
   }
@@ -375,19 +410,7 @@
           meta += LANG === "ru" ? " · повторный клик — снять" : " · click again to remove";
       }
       if (kind) meta += " · " + esc(kind);
-      if (!n.lv && !n._ok){
-        var pend = (n.sq || []).filter(function(sq){ return !bought(sq); });
-        if (pend.length){
-          var names = pend.slice(0, 2).map(function(sq){
-            var p = byId[sq];
-            return p ? ((LANG === "ru" ? p.nru : p.nen) || "").split("{{BR}}")[0] : "";
-          }).filter(Boolean);
-          if (names.length)
-            meta += (LANG === "ru" ? " · сначала: " : " · requires: ") + esc(names.join(" · ")) + (pend.length > 2 ? "…" : "");
-        } else if (!(neighbors[n.id] || []).some(bought)){
-          meta += LANG === "ru" ? " · нужна связь с купленной веткой" : " · needs a link to a purchased node";
-        }
-      }
+
     }
     var capHtml = (n.t === "root") ? '<b>'+esc(nm).replace(/\{\{BR\}\}/g, '<br>')+'</b>' : "";
     tip.innerHTML = capHtml +
